@@ -62,6 +62,9 @@ export interface TransactionStatus {
   currency: string;
   email: string;
   payment_channel: string;
+  lightning_address?: string;
+  lightning_payment_status?: "pending" | "SUCCESS" | "FAILED";
+  satoshis_amount?: number;
   created_at: string;
   updated_at: string;
 }

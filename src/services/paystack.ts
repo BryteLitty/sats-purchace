@@ -2,6 +2,36 @@ import type { ChargeRequest, ChargeResponse, OTPRequest, OTPResponse, PaymentErr
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
 
+export interface ExchangeRates {
+  rates: {
+    btcToUsd: number;
+    btcToGhs: number;
+    ghsToUsd: number;
+  };
+  explanation: {
+    btcToUsd: string;
+    btcToGhs: string;
+    ghsToUsd: string;
+  };
+}
+
+export interface ConversionRequest {
+  amount: number;
+  currency: string;
+}
+
+export interface ConversionResponse {
+  input: {
+    amountInMainUnit: number;
+  };
+  output: {
+    satoshis: number;
+    btcAmount: number;
+    usdEquivalent: number;
+    formattedUsd: string;
+  };
+}
+
 class PaystackService {
   private async request<T>(
     endpoint: string,
@@ -36,7 +66,22 @@ class PaystackService {
     }
   }
 
+  async getRates(): Promise<ExchangeRates> {
+    return this.request<ExchangeRates>("/lightning/rates", {
+      method: "GET",
+    });
+  }
+
+  async convertAmount(conversionData: ConversionRequest): Promise<ConversionResponse> {
+    return this.request<ConversionResponse>("/lightning/convert", {
+      method: "POST",
+      body: JSON.stringify(conversionData),
+    });
+  }
+
   async createCharge(chargeData: ChargeRequest): Promise<ChargeResponse> {
+    console.log("Creating charge with data:", chargeData);
+    console.log("Request URL:", `${API_BASE_URL}/paystack/charge`);
     return this.request<ChargeResponse>("/paystack/charge", {
       method: "POST",
       body: JSON.stringify(chargeData),
@@ -51,9 +96,12 @@ class PaystackService {
   }
 
   async getTransactionStatus(reference: string): Promise<TransactionStatus> {
-    return this.request<TransactionStatus>(`/transactions/status/${reference}`, {
+    console.log(`[${new Date().toISOString()}] Polling transaction status for:`, reference);
+    const result = await this.request<TransactionStatus>(`/transactions/${reference}`, {
       method: "GET",
     });
+    console.log(`[${new Date().toISOString()}] Transaction status:`, result.status, 'Lightning:', result.lightning_payment_status);
+    return result;
   }
 }
 

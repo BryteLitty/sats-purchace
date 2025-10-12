@@ -31,8 +31,14 @@ function App() {
 
   const pollingIntervalRef = useRef<number | null>(null);
 
-  // Poll transaction status when processing payment
+  // Poll transaction status when processing payment - ONLY for payment status, not lightning
   useEffect(() => {
+    // Clear any existing interval first
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+
     if (currentStep === "processing" && paymentState.reference) {
       const pollStatus = async () => {
         try {
@@ -45,25 +51,30 @@ function App() {
           }
 
           if (status.status === "success") {
+            // Payment succeeded, move to success screen
+            // PaymentSuccess component will handle lightning payment status polling
             setPaymentState((prev) => ({
               ...prev,
               amount: status.amount,
               currency: status.currency,
             }));
-            setCurrentStep("success");
 
+            // Clear interval before changing step
             if (pollingIntervalRef.current) {
               clearInterval(pollingIntervalRef.current);
               pollingIntervalRef.current = null;
             }
+
+            setCurrentStep("success");
           } else if (status.status === "failed") {
             setError("Payment failed. Please try again.");
-            setCurrentStep("purchase");
 
             if (pollingIntervalRef.current) {
               clearInterval(pollingIntervalRef.current);
               pollingIntervalRef.current = null;
             }
+
+            setCurrentStep("purchase");
           }
         } catch (err) {
           console.error("Error polling transaction status:", err);
@@ -73,15 +84,15 @@ function App() {
       // Poll immediately, then every 3 seconds
       pollStatus();
       pollingIntervalRef.current = window.setInterval(pollStatus, 3000);
-
-      // Cleanup on unmount or step change
-      return () => {
-        if (pollingIntervalRef.current) {
-          clearInterval(pollingIntervalRef.current);
-          pollingIntervalRef.current = null;
-        }
-      };
     }
+
+    // Cleanup on unmount or step change
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+    };
   }, [currentStep, paymentState.reference]);
 
   const handlePurchaseSubmit = async (formData: PurchaseFormData) => {
@@ -89,35 +100,27 @@ function App() {
     setError(null);
 
     try {
-      // Convert amount to pesewas (smallest currency unit)
-      const amountInPesewas = Math.round(parseFloat(formData.amount) * 100);
-
-      const response = await paystackService.createCharge({
+      const payload = {
         email: formData.email,
-        amount: amountInPesewas.toString(),
+        amount: formData.amount,
         currency: "GHS",
         lightning_address: formData.lightning_address,
         mobile_money: {
           phone: formData.phone,
           provider: formData.provider,
         },
-        metadata: {
-          custom_fields: [
-            {
-              "display_name": "Order Purpose",
-              "variable_name": "order_purpose",
-              "value": "Digital Credit Purchase"
-            }
-          ],
-        },
-      });
+      };
+
+      console.log("Payload being sent to backend:", payload);
+
+      const response = await paystackService.createCharge(payload);
 
       if (response.status) {
         const authType = response.data.status;
 
         setPaymentState({
           reference: response.data.reference,
-          amount: amountInPesewas,
+          amount: parseFloat(formData.amount) * 100,
           currency: "GHS",
           phone: formData.phone,
           authType: authType as "send_otp" | "pay_offline",
@@ -195,6 +198,12 @@ function App() {
   };
 
   const handleReset = () => {
+    // Clear any polling intervals
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+
     setCurrentStep("purchase");
     setPaymentState({
       reference: null,
@@ -207,7 +216,7 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-950 via-gray-900 to-black p-4">
       {currentStep === "purchase" && (
         <PurchaseForm
           onSubmit={handlePurchaseSubmit}
