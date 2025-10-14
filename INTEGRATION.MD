@@ -12,7 +12,7 @@
 npm run dev
 ```
 
-The server will run on `http://localhost:5000`
+The server will run on `http://localhost:3000`
 
 ---
 
@@ -75,7 +75,7 @@ Initiate a mobile money payment. This will trigger an OTP to be sent to the user
 
 **Example cURL:**
 ```bash
-curl -X POST http://localhost:5000/paystack/charge \
+curl -X POST http://localhost:3000/paystack/charge \
   -H "Content-Type: application/json" \
   -d '{
     "email": "user@example.com",
@@ -135,7 +135,7 @@ Submit the OTP that was sent to the user's phone to complete the payment authori
 
 **Example cURL:**
 ```bash
-curl -X POST http://localhost:5000/paystack/submit-otp \
+curl -X POST http://localhost:3000/paystack/submit-otp \
   -H "Content-Type: application/json" \
   -d '{
     "otp": "123456",
@@ -167,7 +167,7 @@ Verify the status of a transaction using Paystack's verification endpoint.
 
 **Example cURL:**
 ```bash
-curl http://localhost:5000/paystack/verify/abc123xyz
+curl http://localhost:3000/paystack/verify/abc123xyz
 ```
 
 **Success Response:**
@@ -195,7 +195,7 @@ Poll the database to check the current status of a transaction. This is useful f
 
 **Example cURL:**
 ```bash
-curl http://localhost:5000/transactions/status/abc123xyz
+curl http://localhost:3000/transactions/status/abc123xyz
 ```
 
 **Success Response:**
@@ -227,7 +227,7 @@ Retrieve all transactions from the database.
 
 **Example cURL:**
 ```bash
-curl http://localhost:5000/transactions/all
+curl http://localhost:3000/transactions/all
 ```
 
 ---
@@ -240,7 +240,7 @@ Retrieve all transactions for a specific email address.
 
 **Example cURL:**
 ```bash
-curl http://localhost:5000/transactions/email/user@example.com
+curl http://localhost:3000/transactions/email/user@example.com
 ```
 
 ---

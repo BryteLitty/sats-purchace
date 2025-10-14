@@ -159,7 +159,7 @@ function App() {
         reference: paymentState.reference,
       });
 
-      if (response.status && response.data.status === "success") {
+      if (response.status && (response.data.status === "success" || response.data.status === "pay_offline")) {
         // OTP verified, now wait for payment to complete
         setCurrentStep("processing");
       } else {

@@ -32,7 +32,7 @@ GET /lightning/rates
 ```javascript
 // Fetch and display rates
 async function fetchRates() {
-  const response = await fetch('http://localhost:5000/lightning/rates');
+  const response = await fetch('http://localhost:3000/lightning/rates');
   const data = await response.json();
 
   // Display on page
@@ -90,7 +90,7 @@ function onAmountChange(ghsAmount) {
   debounceTimer = setTimeout(async () => {
     const pesewas = Math.floor(ghsAmount * 100);
 
-    const response = await fetch('http://localhost:5000/lightning/convert', {
+    const response = await fetch('http://localhost:3000/lightning/convert', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ amount: pesewas, currency: 'GHS' })
@@ -159,7 +159,7 @@ async function initializePayment() {
   const ghsAmount = document.getElementById('ghs-input').value;
   const lightningAddress = document.getElementById('lightning-address').value;
 
-  const response = await fetch('http://localhost:5000/paystack/charge', {
+  const response = await fetch('http://localhost:3000/paystack/charge', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -183,7 +183,7 @@ User returns to: `https://yoursite.com/success?reference=PAY_abc123`
 ### Step 3: Check Transaction Status
 ```javascript
 async function checkTransactionStatus(reference) {
-  const response = await fetch(`http://localhost:5000/transactions/${reference}`);
+  const response = await fetch(`http://localhost:3000/transactions/${reference}`);
   const transaction = await response.json();
 
   return {
@@ -315,7 +315,7 @@ if (transaction.lightning_payment_status === 'FAILED') {
 ## 8. Complete JavaScript Example
 
 ```javascript
-const API_BASE = 'http://localhost:5000';
+const API_BASE = 'http://localhost:3000';
 
 // 1. Fetch and display rates
 async function updateRates() {
@@ -435,7 +435,7 @@ checkStatus();
 ## Environment Variable
 
 ```javascript
-const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:3000';
 ```
 
 ---

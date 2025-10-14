@@ -141,9 +141,17 @@ export function PurchaseForm({ onSubmit, isLoading = false, error }: PurchaseFor
                 </div>
               </div>
             ) : rates ? (
-              <div className="p-4 bg-primary/5 border border-primary/20 rounded-lg w-full space-y-1">
+              <div className="p-4 bg-primary/5 border border-primary/20 rounded-lg w-full space-y-2">
                 <p className="text-sm text-muted-foreground">Current Bitcoin Price</p>
                 <p className="text-3xl font-bold text-primary">${rates.rates.btcToUsd.toLocaleString()}</p>
+                <div className="pt-2 border-t border-primary/10 space-y-1">
+                  <p className="text-xs text-muted-foreground">
+                    {rates.explanation.btcToGhs}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {rates.explanation.ghsToUsd.replace(/\s*\(from Bitnob\)/i, '')}
+                  </p>
+                </div>
               </div>
             ) : null}
 
