@@ -1,20 +1,17 @@
 import { useState, useEffect, useRef } from "react";
 import { PurchaseForm, type PurchaseFormData } from "@/components/purchase-form";
-import { OTPVerification } from "@/components/otp-verification";
-import { PendingAuthorization } from "@/components/pending-authorization";
 import { PaymentProcessing } from "@/components/payment-processing";
 import { PaymentSuccess } from "@/components/payment-success";
-import { paystackService } from "@/services/paystack";
+import { bulkclixService } from "@/services/bulkclix";
 import type { PaymentError } from "@/types/payment";
 
-type PaymentStep = "purchase" | "otp" | "pending" | "processing" | "success";
+type PaymentStep = "purchase" | "processing" | "success";
 
 interface PaymentState {
   reference: string | null;
-  amount: number | null;
-  currency: string | null;
+  amount: string | null;
+  satoshis: string | null;
   phone: string | null;
-  authType: "send_otp" | "pay_offline" | null;
 }
 
 function App() {
@@ -24,14 +21,13 @@ function App() {
   const [paymentState, setPaymentState] = useState<PaymentState>({
     reference: null,
     amount: null,
-    currency: null,
+    satoshis: null,
     phone: null,
-    authType: null,
   });
 
   const pollingIntervalRef = useRef<number | null>(null);
 
-  // Poll transaction status when processing payment - ONLY for payment status, not lightning
+  // Poll BulkClix payment status
   useEffect(() => {
     // Clear any existing interval first
     if (pollingIntervalRef.current) {
@@ -42,21 +38,19 @@ function App() {
     if (currentStep === "processing" && paymentState.reference) {
       const pollStatus = async () => {
         try {
-          const status = await paystackService.getTransactionStatus(paymentState.reference!);
+          const status = await bulkclixService.checkStatus(paymentState.reference!);
 
-          // Show pending state for authorization statuses
-          if (status.status === "send_otp" || status.status === "pay_offline" || status.status === "pending") {
+          if (status.status === "pending") {
             // Keep polling, payment is still being processed
             return;
           }
 
           if (status.status === "success") {
             // Payment succeeded, move to success screen
-            // PaymentSuccess component will handle lightning payment status polling
             setPaymentState((prev) => ({
               ...prev,
               amount: status.amount,
-              currency: status.currency,
+              satoshis: status.satoshis_amount,
             }));
 
             // Clear interval before changing step
@@ -77,13 +71,27 @@ function App() {
             setCurrentStep("purchase");
           }
         } catch (err) {
-          console.error("Error polling transaction status:", err);
+          console.error("Error polling BulkClix payment status:", err);
         }
       };
 
-      // Poll immediately, then every 3 seconds
+      // Poll immediately, then every 5 seconds (as per BulkClix docs)
       pollStatus();
-      pollingIntervalRef.current = window.setInterval(pollStatus, 3000);
+      pollingIntervalRef.current = window.setInterval(pollStatus, 5000);
+
+      // Stop polling after 10 minutes (timeout as per BulkClix docs)
+      const timeoutId = window.setTimeout(() => {
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current);
+          pollingIntervalRef.current = null;
+        }
+        setError("Payment timeout. If you approved the payment, please contact support with reference: " + paymentState.reference);
+        setCurrentStep("purchase");
+      }, 600000); // 10 minutes
+
+      return () => {
+        clearTimeout(timeoutId);
+      };
     }
 
     // Cleanup on unmount or step change
@@ -105,97 +113,53 @@ function App() {
         amount: formData.amount,
         currency: "GHS",
         lightning_address: formData.lightning_address,
-        mobile_money: {
-          phone: formData.phone,
-          provider: formData.provider,
-        },
+        phone_number: formData.phone,
+        network: formData.provider as "MTN" | "TELECEL" | "AIRTELTIGO",
       };
 
-      console.log("Payload being sent to backend:", payload);
+      const response = await bulkclixService.initializePayment(payload);
 
-      const response = await paystackService.createCharge(payload);
-
-      if (response.status) {
-        const authType = response.data.status;
-
+      if (response.success) {
         setPaymentState({
-          reference: response.data.reference,
-          amount: parseFloat(formData.amount) * 100,
-          currency: "GHS",
+          reference: response.reference,
+          amount: formData.amount,
+          satoshis: null,
           phone: formData.phone,
-          authType: authType as "send_otp" | "pay_offline",
         });
 
-        if (authType === "send_otp") {
-          setCurrentStep("otp");
-        } else if (authType === "pay_offline") {
-          setCurrentStep("processing");
-        } else {
-          setError("Payment initialization failed. Please try again.");
-        }
+        // Move to processing step - user should check phone
+        setCurrentStep("processing");
       } else {
         setError("Payment initialization failed. Please try again.");
       }
     } catch (err) {
       const paymentError = err as PaymentError;
-      setError(paymentError.error?.message || "An unexpected error occurred");
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
-  const handleOTPSubmit = async (otp: string) => {
-    if (!paymentState.reference) {
-      setError("Payment reference not found");
-      return;
-    }
+      // Map backend errors to user-friendly messages
+      let userMessage = "Payment initialization failed. Please try again.";
 
-    setIsLoading(true);
-    setError(null);
+      if (paymentError.error?.code === "network_error") {
+        userMessage = "Network error. Please check your internet connection.";
+      } else if (paymentError.error?.message?.toLowerCase().includes("invalid")) {
+        userMessage = "Invalid payment information. Please check your details.";
+      } else if (paymentError.error?.message?.toLowerCase().includes("timeout")) {
+        userMessage = "Request timed out. Please try again.";
+      } else if (paymentError.error?.message?.toLowerCase().includes("insufficient")) {
+        userMessage = "Insufficient balance. Please check your mobile money account.";
+      }
 
-    try {
-      const response = await paystackService.submitOTP({
-        otp,
-        reference: paymentState.reference,
+      // Log detailed error for debugging (not visible to user)
+      console.error("Payment initialization error:", {
+        code: paymentError.error?.code,
+        timestamp: new Date().toISOString(),
       });
 
-      if (response.status && (response.data.status === "success" || response.data.status === "pay_offline")) {
-        // OTP verified, now wait for payment to complete
-        setCurrentStep("processing");
-      } else {
-        setError("Payment verification failed. Please try again.");
-      }
-    } catch (err) {
-      const paymentError = err as PaymentError;
-      setError(paymentError.error?.message || "Invalid OTP. Please try again.");
+      setError(userMessage);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleOTPCancel = () => {
-    setCurrentStep("purchase");
-    setPaymentState({
-      reference: null,
-      amount: null,
-      currency: null,
-      phone: null,
-      authType: null,
-    });
-    setError(null);
-  };
-
-  const handlePendingCancel = () => {
-    setCurrentStep("purchase");
-    setPaymentState({
-      reference: null,
-      amount: null,
-      currency: null,
-      phone: null,
-      authType: null,
-    });
-    setError(null);
-  };
 
   const handleReset = () => {
     // Clear any polling intervals
@@ -208,9 +172,8 @@ function App() {
     setPaymentState({
       reference: null,
       amount: null,
-      currency: null,
+      satoshis: null,
       phone: null,
-      authType: null,
     });
     setError(null);
   };
@@ -225,31 +188,14 @@ function App() {
         />
       )}
 
-      {currentStep === "otp" && (
-        <OTPVerification
-          onSubmit={handleOTPSubmit}
-          onCancel={handleOTPCancel}
-          isLoading={isLoading}
-          error={error}
-          phoneNumber={paymentState.phone || undefined}
-        />
-      )}
-
-      {currentStep === "pending" && (
-        <PendingAuthorization
-          onCancel={handlePendingCancel}
-          phoneNumber={paymentState.phone || undefined}
-        />
-      )}
-
       {currentStep === "processing" && (
         <PaymentProcessing phoneNumber={paymentState.phone || undefined} />
       )}
 
-      {currentStep === "success" && paymentState.amount && paymentState.currency && paymentState.reference && (
+      {currentStep === "success" && paymentState.reference && (
         <PaymentSuccess
-          amount={paymentState.amount}
-          currency={paymentState.currency}
+          amount={paymentState.amount ? parseFloat(paymentState.amount) : 0}
+          currency="GHS"
           reference={paymentState.reference}
           onReset={handleReset}
         />

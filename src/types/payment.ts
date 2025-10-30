@@ -1,7 +1,7 @@
 export interface MobileMoneyProvider {
   id: string;
   name: string;
-  value: "mtn" | "vodafone" | "tigo";
+  value: "MTN" | "TELECEL" | "AIRTELTIGO";
 }
 
 export interface ChargeRequest {

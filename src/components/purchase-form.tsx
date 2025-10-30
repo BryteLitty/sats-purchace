@@ -5,12 +5,12 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { MobileMoneyProvider } from "@/types/payment";
-import { paystackService, type ExchangeRates, type ConversionResponse } from "@/services/paystack";
+import { bulkclixService, type ExchangeRates, type ConversionResponse } from "@/services/bulkclix";
 
 const PROVIDERS: MobileMoneyProvider[] = [
-  { id: "1", name: "MTN Mobile Money", value: "mtn" },
-  { id: "2", name: "Vodafone Cash", value: "vodafone" },
-  { id: "3", name: "AirtelTigo Money", value: "tigo" },
+  { id: "1", name: "MTN Mobile Money", value: "MTN" },
+  { id: "2", name: "Telecel Cash", value: "TELECEL" },
+  { id: "3", name: "AirtelTigo Money", value: "AIRTELTIGO" },
 ];
 
 interface PurchaseFormProps {
@@ -33,13 +33,17 @@ export function PurchaseForm({ onSubmit, isLoading = false, error }: PurchaseFor
     amount: "",
     lightning_address: "",
     phone: "",
-    provider: "mtn",
+    provider: "MTN",
   });
   const [rates, setRates] = useState<ExchangeRates | null>(null);
   const [conversion, setConversion] = useState<ConversionResponse | null>(null);
   const [lightningAddressValid, setLightningAddressValid] = useState<boolean | null>(null);
+  const [amountValid, setAmountValid] = useState<boolean | null>(null);
+  const [phoneValid, setPhoneValid] = useState<boolean | null>(null);
   const [isLoadingRates, setIsLoadingRates] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [lastSubmitTime, setLastSubmitTime] = useState<number>(0);
+  const [rateLimitError, setRateLimitError] = useState<string | null>(null);
   const debounceTimerRef = useRef<number | null>(null);
 
   // Fetch rates on mount and refresh every 5 minutes
@@ -47,7 +51,7 @@ export function PurchaseForm({ onSubmit, isLoading = false, error }: PurchaseFor
     const fetchRates = async () => {
       try {
         setIsLoadingRates(true);
-        const data = await paystackService.getRates();
+        const data = await bulkclixService.getRates();
         setRates(data);
       } catch (err) {
         console.error("Failed to fetch rates:", err);
@@ -74,6 +78,35 @@ export function PurchaseForm({ onSubmit, isLoading = false, error }: PurchaseFor
     setLightningAddressValid(regex.test(address));
   }, [formData.lightning_address]);
 
+  // Validate amount
+  useEffect(() => {
+    const amount = formData.amount;
+    if (amount.length === 0) {
+      setAmountValid(null);
+      return;
+    }
+
+    const numAmount = parseFloat(amount);
+    if (isNaN(numAmount)) {
+      setAmountValid(false);
+      return;
+    }
+
+    setAmountValid(numAmount >= 20 && numAmount <= 500);
+  }, [formData.amount]);
+
+  // Validate phone number (Ghana format: 10 digits starting with 0)
+  useEffect(() => {
+    const phone = formData.phone;
+    if (phone.length === 0) {
+      setPhoneValid(null);
+      return;
+    }
+
+    const phoneRegex = /^0[0-9]{9}$/;
+    setPhoneValid(phoneRegex.test(phone));
+  }, [formData.phone]);
+
   // Convert amount with debouncing
   useEffect(() => {
     if (debounceTimerRef.current) {
@@ -89,7 +122,7 @@ export function PurchaseForm({ onSubmit, isLoading = false, error }: PurchaseFor
     debounceTimerRef.current = window.setTimeout(async () => {
       try {
         const pesewas = Math.floor(amount * 100);
-        const data = await paystackService.convertAmount({
+        const data = await bulkclixService.convertAmount({
           amount: pesewas,
           currency: "GHS",
         });
@@ -109,11 +142,59 @@ export function PurchaseForm({ onSubmit, isLoading = false, error }: PurchaseFor
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Rate limiting: prevent multiple submissions within 5 seconds
+    const now = Date.now();
+    const timeSinceLastSubmit = now - lastSubmitTime;
+    const cooldownPeriod = 5000; // 5 seconds
+
+    if (timeSinceLastSubmit < cooldownPeriod) {
+      const remainingTime = Math.ceil((cooldownPeriod - timeSinceLastSubmit) / 1000);
+      setRateLimitError(`Please wait ${remainingTime} second(s) before submitting again`);
+      return;
+    }
+
+    setRateLimitError(null);
+    setLastSubmitTime(now);
     onSubmit(formData);
   };
 
+  // Sanitize user input to prevent injection attacks
+  const sanitizeInput = (value: string): string => {
+    // Remove any HTML tags
+    let sanitized = value.replace(/<[^>]*>/g, '');
+    // Remove any script-like patterns
+    sanitized = sanitized.replace(/javascript:/gi, '');
+    sanitized = sanitized.replace(/on\w+\s*=/gi, '');
+    // Trim whitespace
+    sanitized = sanitized.trim();
+    return sanitized;
+  };
+
   const handleChange = (field: keyof PurchaseFormData, value: string) => {
-    setFormData((prev) => ({ ...prev, [field]: value }));
+    let sanitizedValue = value;
+
+    // Sanitize all text inputs
+    if (field === 'email' || field === 'lightning_address' || field === 'phone') {
+      sanitizedValue = sanitizeInput(value);
+    }
+
+    // Additional sanitization for amount (allow only numbers and decimal point)
+    if (field === 'amount') {
+      sanitizedValue = value.replace(/[^0-9.]/g, '');
+      // Ensure only one decimal point
+      const parts = sanitizedValue.split('.');
+      if (parts.length > 2) {
+        sanitizedValue = parts[0] + '.' + parts.slice(1).join('');
+      }
+    }
+
+    // Sanitize phone (allow only digits)
+    if (field === 'phone') {
+      sanitizedValue = sanitizedValue.replace(/[^0-9]/g, '');
+    }
+
+    setFormData((prev) => ({ ...prev, [field]: sanitizedValue }));
   };
 
   if (!showForm) {
@@ -227,6 +308,7 @@ export function PurchaseForm({ onSubmit, isLoading = false, error }: PurchaseFor
               onChange={(e) => handleChange("email", e.target.value)}
               required
               disabled={isLoading || isLoadingRates}
+              maxLength={100}
             />
           </div>
 
@@ -236,15 +318,15 @@ export function PurchaseForm({ onSubmit, isLoading = false, error }: PurchaseFor
               id="amount"
               type="number"
               placeholder="50"
-              min="0.1"
-              max="100"
+              min="20"
+              max="500"
               step="0.01"
               value={formData.amount}
               onChange={(e) => handleChange("amount", e.target.value)}
               required
               disabled={isLoading || isLoadingRates}
             />
-            {conversion && (
+            {conversion && amountValid && (
               <div className="p-3 bg-primary/5 border border-primary/20 rounded-md space-y-1">
                 <p className="text-sm font-medium text-foreground">
                   You'll receive: <strong className="text-primary">{conversion.output.satoshis.toLocaleString()}</strong> sats
@@ -254,9 +336,27 @@ export function PurchaseForm({ onSubmit, isLoading = false, error }: PurchaseFor
                 </p>
               </div>
             )}
-            <p className="text-xs text-muted-foreground">
-              Amount range: GH₵0.10 - GH₵100.00
-            </p>
+            {amountValid === false && (
+              <p className="text-xs text-destructive flex items-center gap-1">
+                <svg className="size-3" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd"/>
+                </svg>
+                Amount must be between GH₵20 and GH₵500
+              </p>
+            )}
+            {amountValid === true && (
+              <p className="text-xs text-primary flex items-center gap-1">
+                <svg className="size-3" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"/>
+                </svg>
+                Valid amount
+              </p>
+            )}
+            {amountValid === null && (
+              <p className="text-xs text-muted-foreground">
+                Amount range: GH₵20.00 - GH₵500.00
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -269,6 +369,7 @@ export function PurchaseForm({ onSubmit, isLoading = false, error }: PurchaseFor
               onChange={(e) => handleChange("lightning_address", e.target.value)}
               required
               disabled={isLoading || isLoadingRates}
+              maxLength={100}
             />
             {lightningAddressValid === true && (
               <p className="text-xs text-primary flex items-center gap-1">
@@ -304,7 +405,29 @@ export function PurchaseForm({ onSubmit, isLoading = false, error }: PurchaseFor
               onChange={(e) => handleChange("phone", e.target.value)}
               required
               disabled={isLoading || isLoadingRates}
+              maxLength={10}
             />
+            {phoneValid === true && (
+              <p className="text-xs text-primary flex items-center gap-1">
+                <svg className="size-3" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"/>
+                </svg>
+                Valid phone number
+              </p>
+            )}
+            {phoneValid === false && (
+              <p className="text-xs text-destructive flex items-center gap-1">
+                <svg className="size-3" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd"/>
+                </svg>
+                Must be 10 digits starting with 0 (e.g., 0551234567)
+              </p>
+            )}
+            {phoneValid === null && (
+              <p className="text-xs text-muted-foreground">
+                Format: 10 digits starting with 0 (e.g., 0551234567)
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -324,16 +447,16 @@ export function PurchaseForm({ onSubmit, isLoading = false, error }: PurchaseFor
             </Select>
           </div>
 
-          {error && (
+          {(error || rateLimitError) && (
             <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-              {error}
+              {rateLimitError || error}
             </div>
           )}
 
           <Button
             type="submit"
             className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-6 text-lg shadow-lg shadow-primary/20 transition-all hover:shadow-xl hover:shadow-primary/30"
-            disabled={isLoading || isLoadingRates || !lightningAddressValid}
+            disabled={isLoading || isLoadingRates || !lightningAddressValid || !amountValid || !phoneValid}
           >
             {isLoadingRates ? (
               <span className="flex items-center gap-2">
