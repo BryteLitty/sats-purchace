@@ -38,6 +38,8 @@ export function PurchaseForm({ onSubmit, isLoading = false, error }: PurchaseFor
   const [rates, setRates] = useState<ExchangeRates | null>(null);
   const [conversion, setConversion] = useState<ConversionResponse | null>(null);
   const [lightningAddressValid, setLightningAddressValid] = useState<boolean | null>(null);
+  const [lightningAddressValidating, setLightningAddressValidating] = useState(false);
+  const [lightningAddressError, setLightningAddressError] = useState<string | null>(null);
   const [amountValid, setAmountValid] = useState<boolean | null>(null);
   const [phoneValid, setPhoneValid] = useState<boolean | null>(null);
   const [isLoadingRates, setIsLoadingRates] = useState(true);
@@ -45,6 +47,7 @@ export function PurchaseForm({ onSubmit, isLoading = false, error }: PurchaseFor
   const [lastSubmitTime, setLastSubmitTime] = useState<number>(0);
   const [rateLimitError, setRateLimitError] = useState<string | null>(null);
   const debounceTimerRef = useRef<number | null>(null);
+  const lightningDebounceRef = useRef<number | null>(null);
 
   // Fetch rates on mount and refresh every 5 minutes
   useEffect(() => {
@@ -66,16 +69,76 @@ export function PurchaseForm({ onSubmit, isLoading = false, error }: PurchaseFor
     return () => clearInterval(interval);
   }, []);
 
-  // Validate lightning address
+  // Validate lightning address with API
   useEffect(() => {
     const address = formData.lightning_address;
+
+    // Clear previous timeout
+    if (lightningDebounceRef.current) {
+      clearTimeout(lightningDebounceRef.current);
+    }
+
     if (address.length === 0) {
       setLightningAddressValid(null);
+      setLightningAddressValidating(false);
+      setLightningAddressError(null);
       return;
     }
 
+    // First check format with regex
     const regex = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-    setLightningAddressValid(regex.test(address));
+    if (!regex.test(address)) {
+      setLightningAddressValid(false);
+      setLightningAddressValidating(false);
+      setLightningAddressError("Invalid format");
+      return;
+    }
+
+    // Debounce API validation (wait 1 second after user stops typing)
+    setLightningAddressValidating(true);
+    setLightningAddressError(null);
+
+    lightningDebounceRef.current = window.setTimeout(async () => {
+      try {
+        // Transform lightning address to LNURL endpoint
+        const [username, domain] = address.split('@');
+        const lnurlEndpoint = `https://${domain}/.well-known/lnurlp/${username}`;
+
+        const response = await fetch(lnurlEndpoint, {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' },
+        });
+
+        if (!response.ok) {
+          setLightningAddressValid(false);
+          setLightningAddressError("Address not found");
+          setLightningAddressValidating(false);
+          return;
+        }
+
+        const data = await response.json();
+
+        // Validate LNURL Pay response
+        if (data.tag === 'payRequest' && data.callback && data.minSendable && data.maxSendable) {
+          setLightningAddressValid(true);
+          setLightningAddressError(null);
+        } else {
+          setLightningAddressValid(false);
+          setLightningAddressError("Invalid Lightning address");
+        }
+      } catch (error) {
+        setLightningAddressValid(false);
+        setLightningAddressError("Unable to verify address");
+      } finally {
+        setLightningAddressValidating(false);
+      }
+    }, 1000); // 1 second debounce
+
+    return () => {
+      if (lightningDebounceRef.current) {
+        clearTimeout(lightningDebounceRef.current);
+      }
+    };
   }, [formData.lightning_address]);
 
   // Validate amount
@@ -92,7 +155,7 @@ export function PurchaseForm({ onSubmit, isLoading = false, error }: PurchaseFor
       return;
     }
 
-    setAmountValid(numAmount >= 20 && numAmount <= 500);
+    setAmountValid(numAmount >= 0.1 && numAmount <= 500);
   }, [formData.amount]);
 
   // Validate phone number (Ghana format: 10 digits starting with 0)
@@ -318,7 +381,7 @@ export function PurchaseForm({ onSubmit, isLoading = false, error }: PurchaseFor
               id="amount"
               type="number"
               placeholder="50"
-              min="20"
+              min="0.1"
               max="500"
               step="0.01"
               value={formData.amount}
@@ -341,7 +404,7 @@ export function PurchaseForm({ onSubmit, isLoading = false, error }: PurchaseFor
                 <svg className="size-3" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd"/>
                 </svg>
-                Amount must be between GH₵20 and GH₵500
+                Amount must be between GH₵0.1 and GH₵500
               </p>
             )}
             {amountValid === true && (
@@ -354,7 +417,7 @@ export function PurchaseForm({ onSubmit, isLoading = false, error }: PurchaseFor
             )}
             {amountValid === null && (
               <p className="text-xs text-muted-foreground">
-                Amount range: GH₵20.00 - GH₵500.00
+                Amount range: GH₵0.10 - GH₵500.00
               </p>
             )}
           </div>
@@ -371,20 +434,29 @@ export function PurchaseForm({ onSubmit, isLoading = false, error }: PurchaseFor
               disabled={isLoading || isLoadingRates}
               maxLength={100}
             />
-            {lightningAddressValid === true && (
+            {lightningAddressValidating && (
+              <p className="text-xs text-blue-500 flex items-center gap-1">
+                <svg className="size-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Verifying address...
+              </p>
+            )}
+            {!lightningAddressValidating && lightningAddressValid === true && (
               <p className="text-xs text-primary flex items-center gap-1">
                 <svg className="size-3" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"/>
                 </svg>
-                Valid Lightning Address
+                Valid Lightning Address (verified)
               </p>
             )}
-            {lightningAddressValid === false && (
+            {!lightningAddressValidating && lightningAddressValid === false && (
               <p className="text-xs text-destructive flex items-center gap-1">
                 <svg className="size-3" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd"/>
                 </svg>
-                Invalid format
+                {lightningAddressError || "Invalid Lightning Address"}
               </p>
             )}
             <p className="text-xs text-muted-foreground">
