@@ -5,9 +5,13 @@ import {
 } from "@/components/purchase-form";
 import { PaymentProcessing } from "@/components/payment-processing";
 import { PaymentSuccess } from "@/components/payment-success";
+import { Maintenance } from "@/components/maintenance";
 import { bulkclixService } from "@/services/bulkclix";
 import type { PaymentError } from "@/types/payment";
 import brandIcon from "@/assets/icon.png";
+
+// Toggle maintenance mode - set to false to disable
+const MAINTENANCE_MODE = true;
 
 type PaymentStep = "purchase" | "processing" | "success";
 
@@ -192,6 +196,11 @@ function App() {
     });
     setError(null);
   };
+
+  // Show maintenance page if enabled
+  if (MAINTENANCE_MODE) {
+    return <Maintenance />;
+  }
 
   return (
     <div
