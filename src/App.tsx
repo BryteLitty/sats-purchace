@@ -11,7 +11,7 @@ import type { PaymentError } from "@/types/payment";
 import brandIcon from "@/assets/icon.png";
 
 // Toggle maintenance mode - set to false to disable
-const MAINTENANCE_MODE = true;
+const MAINTENANCE_MODE = false;
 
 type PaymentStep = "purchase" | "processing" | "success";
 
