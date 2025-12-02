@@ -94,6 +94,14 @@ export function PurchaseForm({ onSubmit, isLoading = false, error }: PurchaseFor
       return;
     }
 
+    // Special case: Allow @bitnob.io addresses without API validation
+    if (address.toLowerCase().endsWith('@bitnob.io')) {
+      setLightningAddressValid(true);
+      setLightningAddressValidating(false);
+      setLightningAddressError(null);
+      return;
+    }
+
     // Debounce API validation (wait 1 second after user stops typing)
     setLightningAddressValidating(true);
     setLightningAddressError(null);
