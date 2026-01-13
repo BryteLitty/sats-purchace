@@ -10,9 +10,6 @@ import { bulkclixService } from "@/services/bulkclix";
 import type { PaymentError } from "@/types/payment";
 import brandIcon from "@/assets/icon.png";
 
-// Toggle maintenance mode - set to false to disable
-const MAINTENANCE_MODE = false;
-
 type PaymentStep = "purchase" | "processing" | "success";
 
 interface PaymentState {
@@ -33,7 +30,35 @@ function App() {
     phone: null,
   });
 
+  // Maintenance mode state - controlled by backend
+  const [maintenanceMode, setMaintenanceMode] = useState(false);
+  const [statusChecked, setStatusChecked] = useState(false);
+
   const pollingIntervalRef = useRef<number | null>(null);
+
+  // Check web app status from backend on mount and periodically
+  useEffect(() => {
+    const checkWebAppStatus = async () => {
+      try {
+        const status = await bulkclixService.checkWebAppStatus();
+        setMaintenanceMode(!status.enabled); // Maintenance mode when NOT enabled
+        console.log(`Web app status: ${status.enabled ? 'enabled' : 'disabled (maintenance mode)'}`);
+      } catch (error) {
+        console.error("Failed to check web app status:", error);
+        // On error, assume maintenance mode to be safe
+        setMaintenanceMode(true);
+      } finally {
+        setStatusChecked(true);
+      }
+    };
+
+    checkWebAppStatus();
+
+    // Re-check status every 2 minutes
+    const interval = setInterval(checkWebAppStatus, 120000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   // Poll BulkClix payment status
   useEffect(() => {
@@ -197,8 +222,20 @@ function App() {
     setError(null);
   };
 
-  // Show maintenance page if enabled
-  if (MAINTENANCE_MODE) {
+  // Show loading while checking backend status
+  if (!statusChecked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-black">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-orange-500 mx-auto mb-4"></div>
+          <p className="text-gray-400">Connecting...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show maintenance page if backend reports disabled
+  if (maintenanceMode) {
     return <Maintenance />;
   }
 

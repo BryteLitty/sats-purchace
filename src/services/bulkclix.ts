@@ -81,6 +81,11 @@ export interface BulkClixStatusResponse {
   };
 }
 
+export interface WebAppStatusResponse {
+  enabled: boolean;
+  message: string;
+}
+
 class BulkClixService {
   private async request<T>(
     endpoint: string,
@@ -137,6 +142,12 @@ class BulkClixService {
 
   async checkStatus(reference: string): Promise<BulkClixStatusResponse> {
     return this.request<BulkClixStatusResponse>(`/bulkclix/check-status/${reference}`, {
+      method: "GET",
+    });
+  }
+
+  async checkWebAppStatus(): Promise<WebAppStatusResponse> {
+    return this.request<WebAppStatusResponse>("/settings/web/status", {
       method: "GET",
     });
   }
